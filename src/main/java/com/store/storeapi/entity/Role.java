@@ -13,11 +13,9 @@ public class Role {
     @Setter(AccessLevel.NONE)
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
-
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private ERole name;
-
 
     public Role(ERole name) {
         this.name = name;

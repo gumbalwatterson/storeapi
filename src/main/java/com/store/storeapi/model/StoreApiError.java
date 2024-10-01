@@ -1,14 +1,13 @@
 package com.store.storeapi.model;
 
 import lombok.AllArgsConstructor;
-import lombok.Getter;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
-@Getter
-@Setter
-@NoArgsConstructor
+@Data
 @AllArgsConstructor
-public class MessageResponse {
+@NoArgsConstructor
+public class StoreApiError {
+    private int status;
     private String message;
 }

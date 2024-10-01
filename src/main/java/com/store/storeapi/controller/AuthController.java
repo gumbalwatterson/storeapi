@@ -3,12 +3,13 @@ package com.store.storeapi.controller;
 import com.store.storeapi.entity.Role;
 import com.store.storeapi.entity.User;
 import com.store.storeapi.model.*;
-import com.store.storeapi.repository.RoleRepository;
 import com.store.storeapi.repository.UserRepository;
 import com.store.storeapi.service.impl.UserDetailsImpl;
 import com.store.storeapi.utils.JwtUtils;
 import jakarta.validation.Valid;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -16,42 +17,50 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @CrossOrigin(origins = "*", maxAge = 3600)
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
-    @Autowired
-    AuthenticationManager authenticationManager;
-    @Autowired
-    UserRepository userRepository;
-    @Autowired
-    RoleRepository roleRepository;
-    @Autowired
-    PasswordEncoder encoder;
-    @Autowired
-    JwtUtils jwtUtils;
+    private final AuthenticationManager authenticationManager;
+    private final UserRepository userRepository;
+    private final PasswordEncoder encoder;
+    private final JwtUtils jwtUtils;
 
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
-
+        String username = loginRequest.username();
+        String userEmail = loginRequest.email();
+        if (userEmail != null && !userEmail.isBlank()) {
+            User user = userRepository.findByEmail(userEmail);
+            username = user.getUsername();
+        }
         Authentication authentication = authenticationManager
-                .authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
-
+                .authenticate(new UsernamePasswordAuthenticationToken(username, loginRequest.password()));
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtUtils.generateJwtToken(authentication);
-
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        List<String> roles = userDetails.getAuthorities().stream().map(item -> item.getAuthority())
-                .collect(Collectors.toList());
 
-        return ResponseEntity
-                .ok(new JwtResponse(jwt, userDetails.getId(), userDetails.getUsername(), userDetails.getEmail(), roles));
+        ResponseCookie jwtCookie = jwtUtils.generateJwtCookie(username);
+
+        String baseUrl = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
+        String link = baseUrl + "/api/user/all";
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, jwtCookie.toString())
+                .body(new UserDto(userDetails.getFirstName(), userDetails.getLastName(),
+                        userDetails.getAddress(), userDetails.getCountry(), userDetails.getEmail(),
+                        userDetails.getPhoneNumber()));
+    }
+
+    @GetMapping("/logout")
+    public ResponseEntity<?> logout() {
+        ResponseCookie cookie = jwtUtils.getCleanJwtCookie();
+        return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(new MessageResponse("You've been signed out!"));
     }
 
     @PostMapping("/signup")
@@ -59,41 +68,15 @@ public class AuthController {
         if (userRepository.existsByUsername(signUpRequest.getUsername())) {
             return ResponseEntity.badRequest().body(new MessageResponse("Error: Username is already taken!"));
         }
-
         if (userRepository.existsByEmail(signUpRequest.getEmail())) {
             return ResponseEntity.badRequest().body(new MessageResponse("Error: Email is already in use!"));
         }
-
-        // Create new user's account
-        User user = new User(signUpRequest.getUsername(), signUpRequest.getEmail(),
+        User user = new User(signUpRequest.getUsername(), signUpRequest.getFirstname(), signUpRequest.getLastname(), signUpRequest.getAddress(),
+                signUpRequest.getCountry(), signUpRequest.getEmail(), signUpRequest.getPhoneNumber(),
                 encoder.encode(signUpRequest.getPassword()));
-
-        Set<String> strRoles = signUpRequest.getRole();
-        Set<Role> roles = new HashSet<>();
-
-        if (strRoles == null) {
-            Role userRole = roleRepository.findByName(ERole.ROLE_USER)
-                    .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
-            roles.add(userRole);
-        } else {
-            strRoles.forEach(role -> {
-                switch (role) {
-                    case "admin":
-                        Role adminRole = roleRepository.findByName(ERole.ROLE_ADMIN)
-                                .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
-                        roles.add(adminRole);
-
-                        break;
-                    default:
-                        Role userRole = roleRepository.findByName(ERole.ROLE_USER)
-                                .orElseThrow(() -> new RuntimeException("Error: Role is not found."));
-                        roles.add(userRole);
-                }
-            });
-        }
-
-        user.setRoles(roles);
+        user.setRoles(Set.of(new Role(ERole.ROLE_USER)));
         userRepository.save(user);
+
         return ResponseEntity.ok(new MessageResponse("User registered successfully!"));
     }
 }
